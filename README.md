@@ -1,13 +1,41 @@
-# Sample Hardhat Project
+# Uniswap V1 Solidity Implementation
 
-This project demonstrates a basic Hardhat use case. It comes with a sample contract, a test for that contract, and a script that deploys that contract.
+This project implements the core contracts of Uniswap V1 using Solidity 0.8.20 and Hardhat framework.
 
-Try running some of the following tasks:
+## Contracts
 
-```shell
-npx hardhat help
-npx hardhat test
-REPORT_GAS=true npx hardhat test
-npx hardhat node
-npx hardhat run scripts/deploy.ts
+- `Exchange.sol`: The main exchange contract of Uniswap V1.
+
+- `Factory.sol`: This is a factory to build new exchange contract.
+
+## Usage
+
+1. Install dependencies
+
 ```
+npm install
+```
+
+2. Compile contracts
+
+```
+npx hardhat compile
+```
+
+3. Deploy contracts on local node
+
+```
+npx hardhat run scripts/deploy.js --network localhost
+```
+
+4. Run tests
+
+```
+npx hardhat test
+```
+
+## Acknowledgements
+
+Thanks to Uniswap for providing such a great automated market maker model for us to learn and implement.
+
+Feel free to open issues and PRs!
