@@ -6,7 +6,7 @@ import {IFactory} from "./IFactory.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Errors} from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 
-contract Exchange is IExchange, IERC20,IERC20Errors {
+contract Exchange is IExchange, IERC20, IERC20Errors {
     /* ================================== Exchange Fields ================================= */
     IERC20 public token;
     IFactory public factory;
@@ -18,14 +18,15 @@ contract Exchange is IExchange, IERC20,IERC20Errors {
     uint256 public decimals;
     uint256 public totalSupply;
     mapping(address => uint256) private balances;
-    mapping(address account => mapping(address spender => uint256)) public allowances;
+    mapping(address account => mapping(address spender => uint256))
+        public allowances;
 
     /* ================================== ERC20 END ======================================= */
 
-    constructor() {
-    }
+    constructor() {}
 
     bool initialized;
+
     function setup(address tokenAddr) external {
         require(initialized == false, "");
         initialized = true;
@@ -50,16 +51,18 @@ contract Exchange is IExchange, IERC20,IERC20Errors {
         return address(this);
     }
 
-    function _selfEthBalance() internal view returns (uint256) {
-        return _selfAddress().balance;
+    function _selfEthReserve(
+        uint256 additional
+    ) internal view returns (uint256) {
+        return _selfAddress().balance - additional;
     }
 
-    function _selfTokenBalance() internal view returns (uint256) {
+    function _selfTokenReserve() internal view returns (uint256) {
         return token.balanceOf(_selfAddress());
     }
 
     /**
-     * @notice 按当前比例存入 ETH 和 token 并铸造 LPtoken 代币 给质押者. 
+     * @notice 按当前比例存入 ETH 和 token 并铸造 LPtoken 代币 给质押者.
      * @dev 当 LPtoken 总供应量为 0 时，minLiquidity 无效
      * @param minLiquidity 接受的铸造 LPtoken 最小数量
      * @param maxTokens 存入token的最大数量. 如果 LPtoken 总供应量为 0，则存入最大数量
@@ -77,19 +80,13 @@ contract Exchange is IExchange, IERC20,IERC20Errors {
         );
 
         if (totalSupply > 0) {
-            uint256 _totalLiquidity = totalSupply;
             require(minLiquidity > 0, "minLiquidity must be greater than 0");
-            // 添加前流动性池的 eth 余额
-            uint256 _ethReserve = _selfEthBalance() - msg.value;
-            // 添加前流动性池的 token 余额
-            uint256 _tokenReserve = _selfTokenBalance();
+            // 添加前流动性池的 eth储备
+            uint256 _ethReserve = _selfEthReserve(msg.value);
             // 用户需要添加的 token 的金额
-            uint256 _tokenAmount = (msg.value * _tokenReserve) /
-                _ethReserve +
-                1;
+            uint256 _tokenAmount = (msg.value * _selfTokenReserve()) /_ethReserve +1;
             // LP token的铸造数量
-            uint256 _liquidityMinted = (msg.value * _totalLiquidity) /
-                _ethReserve;
+            uint256 _liquidityMinted = (msg.value * totalSupply) / _ethReserve;
 
             // 断言 需要添加的token数量和铸造的LPtoken是否符合用户预期
             require(
@@ -103,7 +100,7 @@ contract Exchange is IExchange, IERC20,IERC20Errors {
             );
             // 更新用户的LPtoken余额和当前发行的LPtoken总量
             balances[msg.sender] += _liquidityMinted;
-            totalSupply += _totalLiquidity + _liquidityMinted;
+            totalSupply += totalSupply + _liquidityMinted;
 
             // 触发添加流动性和增发LPtoken的事件
             emit AddLiquidity(msg.sender, msg.value, _tokenAmount);
@@ -132,7 +129,6 @@ contract Exchange is IExchange, IERC20,IERC20Errors {
         }
     }
 
-
     /**
      * @notice 从流动池提现
      * @dev 销毁 LPtoken 以当前比例提取ETH和token
@@ -152,15 +148,11 @@ contract Exchange is IExchange, IERC20,IERC20Errors {
             lptAmount > 0 && minEth > 0 && minTokens > 0,
             "the input and output must be greater than 0"
         );
-
-        uint256 _totalLiquidity = totalSupply;
-        assert(_totalLiquidity > 0);
-        // 当前流动性池中token储备数量
-        uint256 _tokenReserve = _selfTokenBalance();
+        assert(totalSupply > 0);
         // 可以提现的eth金额
-        uint256 _ethAmount = (lptAmount * _selfEthBalance()) / _totalLiquidity;
+        uint256 _ethAmount = (lptAmount * _selfEthReserve(0)) / totalSupply;
         // 可以提现的token金额
-        uint256 _tokenAmount = (lptAmount * _tokenReserve) / _totalLiquidity;
+        uint256 _tokenAmount = (lptAmount *  _selfTokenReserve()) / totalSupply;
         // 断言 可以提现的eth和token是否符合用户预期
         require(
             _ethAmount > minEth && _tokenAmount > minTokens,
@@ -178,7 +170,7 @@ contract Exchange is IExchange, IERC20,IERC20Errors {
         emit RemoveLiquidity(msg.sender, _ethAmount, _tokenAmount);
         emit Transfer(msg.sender, address(0), lptAmount);
 
-        return (_ethAmount,_tokenAmount);
+        return (_ethAmount, _tokenAmount);
     }
 
     /**
@@ -226,15 +218,11 @@ contract Exchange is IExchange, IERC20,IERC20Errors {
         address recipient
     ) internal returns (uint256) {
         assert(ethSold > 0 && minTokens > 0);
-        // 接收到用户转入的eth之前的eth储备量
-        uint256 _ethReserve = _selfEthBalance() - ethSold;
-        // 当前token的储备量
-        uint256 _tokenReserve = _selfTokenBalance();
         // 能够买到的token数量
         uint256 _tokensBought = _getInputPrice(
             ethSold,
-            _ethReserve,
-            _tokenReserve
+            _selfEthReserve(ethSold),
+            _selfTokenReserve()
         );
         // 断言 能购买到的token数量符合用户预期
         assert(_tokensBought >= minTokens);
@@ -286,10 +274,12 @@ contract Exchange is IExchange, IERC20,IERC20Errors {
         address recipient
     ) internal returns (uint256) {
         assert(tokensBought > 0 && maxEth > 0);
-        uint256 _tokenReserve = _selfTokenBalance();
-        uint256 _ethReserve = _selfEthBalance() - maxEth;
         // 实际换出的eth金额
-        uint256 _ethSold = _getOutputPrice(maxEth, _ethReserve, _tokenReserve);
+        uint256 _ethSold = _getOutputPrice(
+            maxEth,
+            _selfEthReserve(maxEth),
+            _selfTokenReserve()
+        );
         // 多支付的eth金额
         uint256 _ethRefund = maxEth - _ethSold;
         // 返还多支付的eth
@@ -344,13 +334,11 @@ contract Exchange is IExchange, IERC20,IERC20Errors {
         address recipient
     ) internal returns (uint256) {
         assert(tokensSold > 0 && minEth > 0);
-        uint256 _tokenReserve = _selfTokenBalance();
-        uint256 _ethReserve = _selfEthBalance();
         // 能买到的eth数量
         uint256 _ethBought = _getInputPrice(
             tokensSold,
-            _tokenReserve,
-            _ethReserve
+            _selfTokenReserve(),
+            _selfEthReserve(0)
         );
         // 断言是否符合用户预期
         assert(_ethBought >= minEth);
@@ -407,13 +395,11 @@ contract Exchange is IExchange, IERC20,IERC20Errors {
         address recipient
     ) internal returns (uint256) {
         assert(ethBought > 0);
-        uint256 _tokenReserve = _selfTokenBalance();
-        uint256 _ethReserve = _selfEthBalance();
         // 需要换出的token数量
         uint256 _tokensSold = _getOutputPrice(
             ethBought,
-            _tokenReserve,
-            _ethReserve
+            _selfTokenReserve(),
+            _selfEthReserve(0)
         );
         // 断言token售出数量符合用户预期
         assert(_tokensSold <= maxTokens);
@@ -481,13 +467,11 @@ contract Exchange is IExchange, IERC20,IERC20Errors {
             "exchange cannot be zero address or equal self"
         );
 
-        uint256 _tokenReserve = _selfTokenBalance();
-        uint256 _ethReserve = _selfEthBalance();
         // 获取卖出的token能买入的eth金额
         uint256 _ethBought = _getInputPrice(
             tokensSold,
-            _tokenReserve,
-            _ethReserve
+            _selfTokenReserve(),
+            _selfEthReserve(0)
         );
         // 断言换入的eth符合用户预期
         assert(_ethBought >= minEthBought);
@@ -496,11 +480,9 @@ contract Exchange is IExchange, IERC20,IERC20Errors {
         // 触发买入eth事件
         emit EthPurchase(buyer, tokensSold, _ethBought);
         // 中转交易: 用刚刚买入的ETH到指定Exchange去买入token,得到实际买入的token金额
-        uint256 _tokensBought = IExchange(exchangeAddr).ethToTokenTransferInput{value:_ethBought}(
-            minTokensBought,
-            deadline,
-            recipient
-        );
+        uint256 _tokensBought = IExchange(exchangeAddr).ethToTokenTransferInput{
+            value: _ethBought
+        }(minTokensBought, deadline, recipient);
         return _tokensBought;
     }
 
@@ -587,20 +569,18 @@ contract Exchange is IExchange, IERC20,IERC20Errors {
         IExchange exchange = IExchange(exchangeAddr);
         // 获取要买入Atoken需要多少ETH
         uint256 _ethBought = exchange.getEthToTokenOutputPrice(tokensBought);
-        uint256 _tokenReserve = _selfTokenBalance();
-        uint256 _ethReserve = _selfEthBalance();
         // 获取买入_ethBought数量的ETH需要卖出多少Btoken
         uint256 _tokensSold = _getOutputPrice(
             _ethBought,
-            _tokenReserve,
-            _ethReserve
+            _selfTokenReserve(),
+            _selfEthReserve(0)
         );
         // 断言 卖出的Btoken数量 和 买入Atoken时卖出的ETH数量 是否符合预期
         assert(_tokensSold <= maxTokensSold && _ethBought <= maxEthSold);
         // 卖出Btoken到 本Exchange
         assert(token.transferFrom(buyer, _selfAddress(), _tokensSold));
         // 到Atoken的exchange,用卖出Btoken得到的ETH去买入Atoken
-        uint256 _ethSold = exchange.ethToTokenTransferOutput{value:_ethBought}(
+        exchange.ethToTokenTransferOutput{value: _ethBought}(
             tokensBought,
             deadline,
             recipient
@@ -805,9 +785,7 @@ contract Exchange is IExchange, IERC20,IERC20Errors {
         uint256 ethSold
     ) external view returns (uint256) {
         assert(ethSold > 0);
-        uint256 _tokenReserve = _selfTokenBalance();
-        uint256 _ethReserve = _selfEthBalance();
-        return _getInputPrice(ethSold, _ethReserve, _tokenReserve);
+        return _getInputPrice(ethSold, _selfEthReserve(0), _selfTokenReserve());
     }
 
     /**
@@ -820,9 +798,12 @@ contract Exchange is IExchange, IERC20,IERC20Errors {
         uint256 tokensBought
     ) external view returns (uint256) {
         assert(tokensBought > 0);
-        uint256 _tokenReserve = _selfTokenBalance();
-        uint256 _ethReserve = _selfEthBalance();
-        return _getOutputPrice(tokensBought, _ethReserve, _tokenReserve);
+        return
+            _getOutputPrice(
+                tokensBought,
+                _selfEthReserve(0),
+                _selfTokenReserve()
+            );
     }
 
     /**
@@ -835,9 +816,8 @@ contract Exchange is IExchange, IERC20,IERC20Errors {
         uint256 tokenSold
     ) external view returns (uint256) {
         assert(tokenSold > 0);
-        uint256 _tokenReserve = _selfTokenBalance();
-        uint256 _ethReserve = _selfEthBalance();
-        return _getInputPrice(tokenSold, _tokenReserve, _ethReserve);
+        return
+            _getInputPrice(tokenSold, _selfTokenReserve(), _selfEthReserve(0));
     }
 
     /**
@@ -850,9 +830,8 @@ contract Exchange is IExchange, IERC20,IERC20Errors {
         uint256 ethBought
     ) external view returns (uint256) {
         assert(ethBought > 0);
-        uint256 _tokenReserve = _selfTokenBalance();
-        uint256 _ethReserve = _selfEthBalance();
-        return _getOutputPrice(ethBought, _ethReserve, _tokenReserve);
+        return
+            _getOutputPrice(ethBought, _selfEthReserve(0), _selfTokenReserve());
     }
 
     function tokenAddress() external view returns (address) {
@@ -879,21 +858,21 @@ contract Exchange is IExchange, IERC20,IERC20Errors {
         address from,
         address to,
         uint256 value
-    ) public  returns (bool) {
+    ) public returns (bool) {
         _spendAllowance(from, msg.sender, value);
         _transfer(from, to, value);
         return true;
     }
 
-    function approve(
-        address spender,
-        uint256 value
-    ) public  returns (bool) {
+    function approve(address spender, uint256 value) public returns (bool) {
         _approve(msg.sender, spender, value);
         return true;
     }
 
-        function allowance(address owner, address spender) public view  returns (uint256) {
+    function allowance(
+        address owner,
+        address spender
+    ) public view returns (uint256) {
         return allowances[owner][spender];
     }
 
@@ -907,7 +886,7 @@ contract Exchange is IExchange, IERC20,IERC20Errors {
         _update(from, to, value);
     }
 
-    function _update(address from, address to, uint256 value) internal  {
+    function _update(address from, address to, uint256 value) internal {
         if (from == address(0)) {
             // Overflow check required: The rest of the code assumes that totalSupply never overflows
             totalSupply += value;
@@ -946,7 +925,7 @@ contract Exchange is IExchange, IERC20,IERC20Errors {
         address spender,
         uint256 value,
         bool emitEvent
-    ) internal  {
+    ) internal {
         if (owner == address(0)) {
             revert ERC20InvalidApprover(address(0));
         }
@@ -963,7 +942,7 @@ contract Exchange is IExchange, IERC20,IERC20Errors {
         address owner,
         address spender,
         uint256 value
-    ) internal  {
+    ) internal {
         uint256 currentAllowance = allowances[owner][spender];
         if (currentAllowance != type(uint256).max) {
             if (currentAllowance < value) {
