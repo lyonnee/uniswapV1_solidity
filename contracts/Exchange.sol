@@ -28,13 +28,13 @@ contract Exchange is IExchange, IERC20, IERC20Errors {
     bool initialized;
 
     function setup(address tokenAddr) external {
-        require(initialized == false, "");
+        require(initialized == false, "contract has been initialized");
         initialized = true;
 
         token = IERC20(tokenAddr);
         factory = IFactory(msg.sender);
-        name = "UniswapV1";
-        symbol = "UniswapV1";
+        name = "LP Token";
+        symbol = "UNI_LP";
         decimals = 18;
     }
 
@@ -150,9 +150,9 @@ contract Exchange is IExchange, IERC20, IERC20Errors {
         );
         assert(totalSupply > 0);
         // 可以提现的eth金额
-        uint256 _ethAmount = (lptAmount * _selfEthReserve(0)) / totalSupply;
+        uint256 _ethAmount = lptAmount * _selfEthReserve(0) / totalSupply;
         // 可以提现的token金额
-        uint256 _tokenAmount = (lptAmount *  _selfTokenReserve()) / totalSupply;
+        uint256 _tokenAmount = lptAmount *  _selfTokenReserve()/ totalSupply;
         // 断言 可以提现的eth和token是否符合用户预期
         require(
             _ethAmount > minEth && _tokenAmount > minTokens,
